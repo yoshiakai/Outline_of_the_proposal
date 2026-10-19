@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>企画書プロンプトジェネレータ（骨子主導＋画像生成対応）</title>
+    <style>
+        :root { --primary: #2563eb; --bg: #f8fafc; --border: #e2e8f0; --accent: #db2777; --secondary: #64748b; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: var(--bg); color: #333; line-height: 1.6; padding: 20px; }
+        .container { max-width: 1100px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 20px; }
+        .form-section { flex: 1 1 500px; background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .preview-section { flex: 1 1 500px; background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); position: sticky; top: 20px; height: fit-content; max-height: 95vh; display: flex; flex-direction: column; }
+        h1, h2 { margin-top: 0; font-size: 1.2rem; border-bottom: 2px solid var(--border); padding-bottom: 10px; }
+        .human-core { border-left: 4px solid var(--accent); padding-left: 15px; margin-bottom: 25px; }
+        .human-core h2 { color: var(--accent); border-bottom: none; padding-bottom: 0; margin-bottom: 5px; }
+        .human-core p { font-size: 0.85rem; color: #666; margin-top: 0; }
+        label { display: block; font-weight: bold; margin-top: 15px; margin-bottom: 5px; font-size: 0.9rem; }
+        input[type="text"], textarea, select { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 4px; box-sizing: border-box; }
+        textarea { resize: vertical; min-height: 80px; }
+        .textarea-large { min-height: 120px; }
+        .checkbox-group { display: flex; flex-direction: column; gap: 8px; margin-top: 5px; }
+        .checkbox-label { display: flex; align-items: flex-start; font-weight: normal; font-size: 0.9rem; margin: 0; cursor: pointer; }
+        .checkbox-label input { margin-right: 8px; margin-top: 4px; }
+        .hint { font-size: 0.8rem; color: #64748b; margin-top: 2px; }
+        
+        /* 画像生成用フォームのスタイル */
+        .image-prompt-item { border: 1px solid var(--border); padding: 15px; margin-bottom: 15px; border-radius: 6px; background: #f8fafc; position: relative; }
+        .remove-btn { position: absolute; top: 10px; right: 10px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; padding: 5px 10px; font-size: 0.8rem; transition: 0.2s; }
+        .remove-btn:hover { background: #dc2626; }
+        
+        #promptPreview { width: 100%; flex-grow: 1; min-height: 400px; font-family: monospace; font-size: 0.85rem; padding: 15px; background: #1e293b; color: #f8fafc; border-radius: 6px; border: none; white-space: pre-wrap; line-height: 1.4; overflow-y: auto; }
+        .btn { background-color: var(--primary); color: white; border: none; padding: 12px 20px; border-radius: 4px; cursor: pointer; font-size: 1rem; width: 100%; margin-top: 15px; font-weight: bold; transition: opacity 0.2s; }
+        .btn:hover { opacity: 0.9; }
+        .btn-success { background-color: #16a34a; }
+        .btn-secondary { background-color: var(--secondary); margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="form-section">
+        
+        <div class="human-core">
+            <h2>1. 企画の骨子（人間が定義する領域）</h2>
+            <p>※ここが企画の命です。過去にない独自性や感情的価値を入力してください。</p>
+            
+            <label>A. 企画の概要・タイトル</label>
+            <input type="text" id="theme" placeholder="例：プロジェクションマッピングを用いた地域特産品のPRイベント">
+
+            <label>B. 解決したい課題・背景</label>
+            <textarea id="background" placeholder="なぜこの企画をやるのか？ 既存のアプローチの何が不満か？"></textarea>
+
+            <label>C. 企画のコアバリュー・絶対にブレさせたくない核（自由記述）</label>
+            <textarea id="coreValue" class="textarea-large" placeholder="例：「AとBの全く新しい組み合わせ」「最新技術を使わず、あえてアナログな手法で実装する」など、LLMに勝手に改変されたくない独自の強みを書いてください。"></textarea>
+
+            <label>D. ユーザーに提供したい体験・感情（UX・感性）</label>
+            <textarea id="uxEmotion" placeholder="例：最初は驚き、最後には温かい気持ちになる。直感的に操作できる心地よさ。"></textarea>
+        </div>
+
+        <h2>2. 補助情報・制約</h2>
+        <label>ターゲット・対象者</label>
+        <input type="text" id="target" placeholder="例：一般消費者、自治体、学生など">
+
+        <label>
+            予算・制約条件
+            <span style="font-weight: normal; font-size: 0.8rem; margin-left: 10px;">
+                <input type="checkbox" id="skipConstraints"> スキップする
+            </span>
+        </label>
+        <textarea id="constraints" placeholder="例：予算は数万円以内。高価な機材は不可。"></textarea>
+
+        <h2>3. LLMへの役割指定（ブラッシュアップの方向性）</h2>
+        <div class="checkbox-group" id="focusPoints">
+            <label class="checkbox-label"><input type="checkbox" value="私が提示した「コアバリュー」が市場でどう差別化できるかの論理的裏付け"> 独自性の論理的裏付け・競合との比較</label>
+            <label class="checkbox-label"><input type="checkbox" value="実現に向けた技術的ハードル、リスクの洗い出しと現実的な解決策"> 実現可能性（リスクと解決策）の検証</label>
+            <label class="checkbox-label"><input type="checkbox" value="提示した「ユーザー体験（UX）」をより確実に引き出すための具体的な仕掛けの提案"> ユーザー体験（UX）を増幅させる具体策の提案</label>
+            <label class="checkbox-label"><input type="checkbox" value="企画を第三者（クライアントや決裁者）に説得力をもって伝えるためのストーリーテリング"> 説得力のあるストーリーラインの構築</label>
+        </div>
+
+        <h2>4. 環境設定と厳守ルール</h2>
+        <label>使用するLLM</label>
+        <select id="llmType">
+            <option value="generic">汎用（指定なし）</option>
+            <option value="claude">Claude (Artifactsでのプレビュー出力推奨)</option>
+            <option value="chatgpt" selected>ChatGPT (DALL-E 3での直接画像生成・ファイル出力対応)</option>
+            <option value="gemini">Gemini (Imagenでの直接画像生成・Google Docs出力対応)</option>
+        </select>
+
+        <label>あなたのスキルレベル</label>
+        <select id="skillLevel">
+            <option value="初学者（専門用語は避け、概念から解説が必要）">初学者</option>
+            <option value="中級者（ある程度の専門用語は理解できる）" selected>中級者</option>
+            <option value="上級者（技術的・専門的な議論が可能）">上級者</option>
+        </select>
+
+        <label>最終出力フォーマット</label>
+        <select id="format">
+            <option value="Markdown（テキスト）">Markdown（テキスト）</option>
+            <option value="構造化レポート形式">構造化レポート形式</option>
+        </select>
+
+        <div class="checkbox-group" id="llmRules" style="margin-top: 15px;">
+            <label class="checkbox-label"><input type="checkbox" value="絶対に「過去の無難で一般的な企画」に丸め込もうとしないでください。私が提示したアイデアを「前提」として受け入れてください。" checked> 無難な企画に丸め込まず、人間のアイデアを最優先する</label>
+            <label class="checkbox-label"><input type="checkbox" value="あなたがゼロから新しい企画案を出すのではなく、私が提示した骨子の『補強・検証・肉付け』に徹してください。" checked> LLMは「考案者」ではなく「補強者」に徹する</label>
+            <label class="checkbox-label"><input type="checkbox" value="一度に多くの質問をせず、対話のステップごとに1〜2個の質問にとどめてください。" checked> 一度の質問は2つまで</label>
+        </div>
+
+        <h2 style="margin-top: 40px; border-color: var(--secondary); color: var(--secondary);">5. 図・イラスト用プロンプトの生成（オプション）</h2>
+        <p class="hint" id="imageHint">選択したLLM（ChatGPTやGemini等）に直接画像を生成させるか、外部AI用のテキストを出力させます。</p>
+        
+        <div id="imagePromptList"></div>
+        <button type="button" id="addImageBtn" class="btn btn-secondary">＋ 画像・図解を追加する</button>
+        
+    </div>
+
+    <div class="preview-section">
+        <h2>完成したプロンプト</h2>
+        <p class="hint">右下の角をドラッグして広げられます。そのまま直接編集も可能です。</p>
+        <textarea id="promptPreview"></textarea>
+        <button id="copyBtn" class="btn">クリップボードにコピー</button>
+    </div>
+</div>
+
+<script>
+    const inputs = document.querySelectorAll('.form-section > input, .form-section > select, .form-section > textarea, .form-section .human-core input, .form-section .human-core textarea, .checkbox-group input');
+    const promptPreview = document.getElementById('promptPreview');
+    const copyBtn = document.getElementById('copyBtn');
+    const skipConstraints = document.getElementById('skipConstraints');
+    const constraintsText = document.getElementById('constraints');
+    const imagePromptList = document.getElementById('imagePromptList');
+    const addImageBtn = document.getElementById('addImageBtn');
+
+    // 制約条件スキップ処理
+    skipConstraints.addEventListener('change', (e) => {
+        constraintsText.disabled = e.target.checked;
+        if (e.target.checked) constraintsText.value = '';
+        generatePrompt();
+    });
+
+    const llmInstructions = {
+        generic: "指定したフォーマットで出力してください。",
+        claude: "「Artifacts」機能を使用し、指定フォーマットのコードブロックまたはプレビュー画面として出力してください。",
+        chatgpt: "Advanced Data Analysis等を利用し、可能であればダウンロード可能なドキュメントファイルとして生成してください。",
+        gemini: "私がGoogleドキュメントにエクスポートしやすいように整形して出力してください。"
+    };
+
+    // 画像フォームの追加
+    function addImageForm(data = null) {
+        const div = document.createElement('div');
+        div.className = 'image-prompt-item';
+        div.innerHTML = `
+            <button type="button" class="remove-btn" onclick="this.parentElement.remove(); generatePrompt();">削除</button>
+            <label>画像のスタイル</label>
+            <select class="img-style">
+                <option value="インフォグラフィック・概念図（シンプルで分かりやすい図解）">概念図・インフォグラフィック</option>
+                <option value="ワイヤーフレーム・UIモックアップ（画面設計図）">UIモックアップ・画面設計</option>
+                <option value="コンセプトアート（企画の世界観を伝える魅力的なイラスト）" selected>コンセプトイラスト（世界観・キービジュアル）</option>
+                <option value="フォトリアル（実際のイベントやプロダクトの写真風）">写真風（フォトリアル）</option>
+            </select>
+            <label>描画したい具体的な内容・シーン</label>
+            <textarea class="img-desc" placeholder="例：ユーザーがスマホをかざすと、特産品のキャラクターが飛び出してくる様子"></textarea>
+        `;
+        
+        if (data) {
+            div.querySelector('.img-style').value = data.style;
+            div.querySelector('.img-desc').value = data.desc;
+        }
+
+        div.querySelectorAll('select, textarea').forEach(el => {
+            el.addEventListener('input', generatePrompt);
+            el.addEventListener('change', generatePrompt);
+        });
+
+        imagePromptList.appendChild(div);
+        generatePrompt();
+    }
+
+    addImageBtn.addEventListener('click', () => addImageForm());
+
+    // プロンプト全体の生成
+    function generatePrompt() {
+        const theme = document.getElementById('theme').value || '未入力';
+        const background = document.getElementById('background').value || '未入力';
+        const coreValue = document.getElementById('coreValue').value || '未入力';
+        const uxEmotion = document.getElementById('uxEmotion').value || '未入力';
+        const target = document.getElementById('target').value || '未定';
+        const constraints = skipConstraints.checked ? '特になし' : (document.getElementById('constraints').value || '未定');
+        const llmType = document.getElementById('llmType').value;
+        const skillLevel = document.getElementById('skillLevel').value;
+        const format = document.getElementById('format').value;
+
+        const focusPoints = Array.from(document.querySelectorAll('#focusPoints input:checked')).map(el => `・${el.value}`).join('\n') || '・提示された情報の論理的な補強';
+        const rules = Array.from(document.querySelectorAll('#llmRules input:checked')).map(el => `- ${el.value}`).join('\n');
+
+        let promptText = `# 指示
+あなたは優秀なプロジェクトプランナーであり、私のアイデアを論理的に補強する「壁打ち相手」です。
+私はすでに独自のアイデアの骨子（コア）を持っています。あなたの役割は、過去の膨大なデータと論理的思考に基づき、私のアイデアを「無難な形」に改変することなく、多角的にブラッシュアップすることです。
+
+# 進行手順
+このセッションは2つのフェーズで進行します。
+
+## フェーズ1：対話による企画の補強・検証（現在）
+- 私のスキルレベル（${skillLevel}）に合わせて対話してください。
+- 以下の【人間の出した骨子】を絶対に否定・改変せず、前提として受け入れてください。
+- その上で、以下の【ブラッシュアップの重点項目】について、企画の解像度を上げるための質問や検証を投げかけてください。
+
+＜厳守ルール＞
+${rules}
+
+## フェーズ2：企画書の作成（トリガー待ち）
+私が「では、企画書にまとめて」と発言したら対話を終了し、これまでの内容を以下の条件で企画書として出力してください。
+- 出力フォーマット：${format}
+- 特記事項：${llmInstructions[llmType]}
+
+---
+【人間の出した骨子】
+■ 企画の概要・タイトル
+${theme}
+
+■ 背景・解決したい課題
+${background}
+
+■ 企画のコアバリュー・絶対にブレさせたくない核
+${coreValue}
+
+■ ユーザーに提供したい体験・感情（UX・感性）
+${uxEmotion}
+
+【補助情報】
+■ ターゲット・対象者：${target}
+■ 予算・制約条件：${constraints}
+
+【ブラッシュアップの重点項目】
+${focusPoints}
+---
+
+指示を理解したら、フェーズ1の最初の質問（私のアイデアに対する最初のフィードバックと深掘り）を投げかけてください。\n`;
+
+        // 画像生成プロンプトの追加処理（LLMの特性で指示を分岐）
+        const imageItems = document.querySelectorAll('.image-prompt-item');
+        if (imageItems.length > 0) {
+            promptText += `\n=================================\n【付録：画像生成・図解の要求】\n`;
+            
+            if (llmType === 'chatgpt') {
+                promptText += `※あなたにはDALL-E 3等の画像生成機能があるはずです。フェーズ2の企画書作成完了後、以下の要件に基づいて「実際に画像を生成」して提示してください。\n\n`;
+            } else if (llmType === 'gemini') {
+                promptText += `※あなたには画像生成機能があるはずです。フェーズ2の企画書作成完了後、以下の要件に基づいて「実際に画像を生成」して提示してください。（※人物や特定制限に抵触する場合は、テキストでの情景描写で代替可）\n\n`;
+            } else if (llmType === 'claude') {
+                promptText += `※あなた自身は直接的な画像生成機能を持っていません。フェーズ2の企画書作成時、以下の要件について「私がMidjourney等で使うためのプロンプトテキスト」として書き出すか、可能であればArtifactsを用いて「SVGによる概念図・モックアップ」として出力してください。\n\n`;
+            } else {
+                promptText += `※以下の要件は、私が別の画像生成AI（Midjourney等）に入力するためのものです。フェーズ2の企画書作成時、テキストとして整理して出力してください。\n\n`;
+            }
+            
+            imageItems.forEach((item, index) => {
+                const style = item.querySelector('.img-style').value;
+                const desc = item.querySelector('.img-desc').value || '(内容未入力)';
+                
+                promptText += `▼ 画像・図解 ${index + 1}\n`;
+                promptText += `- スタイル: ${style}\n`;
+                promptText += `- 描画内容: ${desc}\n`;
+                promptText += `- 【反映すべきコンテキスト】企画のテーマ: ${theme}\n`;
+                promptText += `- 【反映すべきコンテキスト】ユーザー体験: ${uxEmotion}\n`;
+                promptText += `- 【反映すべきコンテキスト】コアバリュー: ${coreValue}\n\n`;
+            });
+        }
+
+        promptPreview.value = promptText;
+        
+        // データの保存
+        const formData = { textInputs: {}, checkboxInputs: {}, imagePrompts: [] };
+        
+        inputs.forEach(input => {
+            if (input.type === 'checkbox') {
+                formData.checkboxInputs[input.id || input.value] = input.checked;
+            } else {
+                formData.textInputs[input.id] = input.value;
+            }
+        });
+
+        imageItems.forEach(item => {
+            formData.imagePrompts.push({
+                style: item.querySelector('.img-style').value,
+                desc: item.querySelector('.img-desc').value
+            });
+        });
+
+        localStorage.setItem('promptGenDataV4', JSON.stringify(formData));
+    }
+
+    function loadData() {
+        const saved = localStorage.getItem('promptGenDataV4');
+        if (saved) {
+            const formData = JSON.parse(saved);
+            
+            inputs.forEach(input => {
+                if (input.type === 'checkbox') {
+                    input.checked = formData.checkboxInputs[input.id || input.value] || false;
+                } else if (formData.textInputs[input.id]) {
+                    input.value = formData.textInputs[input.id];
+                }
+            });
+            
+            if (skipConstraints.checked) constraintsText.disabled = true;
+
+            if (formData.imagePrompts && formData.imagePrompts.length > 0) {
+                formData.imagePrompts.forEach(data => addImageForm(data));
+            }
+        }
+        generatePrompt();
+    }
+
+    inputs.forEach(input => {
+        input.addEventListener('input', generatePrompt);
+        input.addEventListener('change', generatePrompt);
+    });
+
+    copyBtn.addEventListener('click', () => {
+        promptPreview.select();
+        document.execCommand('copy');
+        const originalText = copyBtn.innerText;
+        copyBtn.innerText = 'コピーしました！';
+        copyBtn.classList.add('btn-success');
+        setTimeout(() => {
+            copyBtn.innerText = originalText;
+            copyBtn.classList.remove('btn-success');
+        }, 2000);
+    });
+
+    loadData();
+</script>
+
+</body>
+</html>
